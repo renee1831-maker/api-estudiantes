@@ -1,0 +1,16 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.db
+data/
+.env
+.git/
+.idea/
+.vscode/
+tests/
+reports/
+deploy/
+.pytest_cache/
+buildspec.yml
+README.md

@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.db
+data/
+.idea/
+.vscode/
+.pytest_cache/
+reports/
+deploy/Dockerrun.aws.json

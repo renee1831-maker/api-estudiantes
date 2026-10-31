@@ -1,0 +1,56 @@
+version: 0.2
+
+# Requiere en el proyecto de CodeBuild: "Privileged" activado (para docker build)
+# y un rol con permisos sobre ECR (LabRole en AWS Academy).
+env:
+  variables:
+    IMAGE_REPO_NAME: api-estudiantes
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - pip install -r requirements-dev.txt
+
+  pre_build:
+    commands:
+      - echo "== 1/3 Pruebas automatizadas =="
+      - python -m pytest -q --junitxml=reports/junit.xml
+      - echo "== Preparando ECR =="
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - REGISTRY=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - REPOSITORY_URI=$REGISTRY/$IMAGE_REPO_NAME
+      - APP_VERSION=$(cat VERSION)
+      - COMMIT_SHA=$(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_SHA:-build-$CODEBUILD_BUILD_NUMBER}
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $REGISTRY
+
+  build:
+    commands:
+      - echo "== 2/3 Construyendo imagen $REPOSITORY_URI:$IMAGE_TAG (v$APP_VERSION) =="
+      - docker build --build-arg APP_VERSION=$APP_VERSION --build-arg COMMIT_SHA=$IMAGE_TAG -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest .
+
+  post_build:
+    commands:
+      - '[ "$CODEBUILD_BUILD_SUCCEEDING" = "1" ] || { echo "Build fallido: no se publica imagen"; exit 1; }'
+      - echo "== 3/3 Publicando imagen y generando Dockerrun.aws.json =="
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - docker push $REPOSITORY_URI:latest
+      - sed "s|__IMAGE_URI__|$REPOSITORY_URI:$IMAGE_TAG|" deploy/Dockerrun.aws.json.template > deploy/Dockerrun.aws.json
+      - cat deploy/Dockerrun.aws.json
+
+reports:
+  pytest-reports:
+    files:
+      - junit.xml
+    base-directory: reports
+    file-format: JUNITXML
+
+# Elastic Beanstalk solo recibe el descriptor que apunta a la imagen exacta (inmutable) de este commit.
+artifacts:
+  base-directory: deploy
+  files:
+    - Dockerrun.aws.json
+    - .ebextensions/**/*
